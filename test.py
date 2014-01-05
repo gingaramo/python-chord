@@ -16,6 +16,17 @@ def check_finger_table_integrity(id, finger_table, hash_list):
 			# there's no other finger in between
 			assert (id + (1<<i)) % SIZE == finger_id or not inrange(hash_list[j], (id + (1<<i)) % SIZE, finger_id)
 
+def check_key_lookup(peers, hash_list):
+	for key in range(SIZE):
+		# select random node
+		node = peers[random.randrange(len(peers))]
+		# get the successor
+		target = node.find_successor(key)
+		for i in range(len(peers)):
+			if inrange(key, hash_list[i]+1, hash_list[(i+1)%len(peers)]+1):
+				assert target.id() == hash_list[(i+1)%len(peers)]
+
+
 # create addresses
 address_list = map(lambda addr: Address('127.0.0.1', addr), range(10100, 10400, 7))
 # keep unique ones
@@ -25,16 +36,13 @@ hash_list 	 = map(lambda addr: addr.__hash__(), address_list)
 # create the nodes
 locals_list   = []
 for i in range(0, len(address_list)):
-	try:
-		if len(locals_list) == 0:
-			local = Local(address_list[i])
-		else:
-			# use a random already created peer's address
-			# as a remote
-			local = Local(address_list[i], locals_list[random.randrange(len(locals_list))].address_)
-		locals_list.append(local)
-	except Exception:
-		pass
+	if len(locals_list) == 0:
+		local = Local(address_list[i])
+	else:
+		# use a random already created peer's address
+		# as a remote
+		local = Local(address_list[i], locals_list[random.randrange(len(locals_list))].address_)
+	locals_list.append(local)
 
 print "done creating peers, our pid %s is" % os.getpid()
 hash_list.sort()
@@ -42,6 +50,9 @@ hash_list.sort()
 # check integrity
 for local in locals_list:
 	check_finger_table_integrity(local.id(), local.finger_, hash_list)
+
+# check key lookup consistency
+check_key_lookup(locals_list, hash_list)
 
 # shutdown peers
 for local in locals_list:
