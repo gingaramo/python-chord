@@ -1,11 +1,20 @@
 python-chord
 ============
 
-Python **Chord** implementation from paper available [here](http://pdos.csail.mit.edu/papers/chord:sigcomm01/chord_sigcomm.pdf).
+Python **Chord** implementation, [paper available here](http://pdos.csail.mit.edu/papers/chord:sigcomm01/chord_sigcomm.pdf).
 
-Currently supports the sequential addition of peers into the network.
+Currently supports concurrent addition of peers into the network.
 
-Finger tables are consistent, key lookup is also consistent.
+Some key lookup consistency test implemented in test.py, and nodes distribute keys accordingly to node joins.
+
+### What's next?
+
+- Keep list of the r successors of a node to support node failure
+- Implement some source of replication
+- Build a decentralized and replicated user-space file system
 
 **DISCLAIMER**
-Project for fun to learn about DHT's, not intended to be used in real life.
+Pet project for fun to learn about DHT's, not intended to be used in real life.
+
+Other projects:
+ - Comming soon

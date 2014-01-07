@@ -1,4 +1,5 @@
 import os
+import time
 import socket
 import random
 from peer import *
@@ -24,11 +25,12 @@ def check_key_lookup(peers, hash_list):
 		target = node.find_successor(key)
 		for i in range(len(peers)):
 			if inrange(key, hash_list[i]+1, hash_list[(i+1)%len(peers)]+1):
+				print "key: %s, target id : %s, should be : %s" % (key, target.id(), hash_list[(1+i)%len(peers)])
 				assert target.id() == hash_list[(i+1)%len(peers)]
 
 
 # create addresses
-address_list = map(lambda addr: Address('127.0.0.1', addr), range(10100, 10400, 7))
+address_list = map(lambda addr: Address('127.0.0.1', addr), range(10400, 10700, 7))
 # keep unique ones
 address_list = sorted(set(address_list))
 # hash the addresses
@@ -43,16 +45,29 @@ for i in range(0, len(address_list)):
 		# as a remote
 		local = Local(address_list[i], locals_list[random.randrange(len(locals_list))].address_)
 	locals_list.append(local)
+	time.sleep(0.5)
+
+time.sleep(10)
 
 print "done creating peers, our pid %s is" % os.getpid()
 hash_list.sort()
+print hash_list
 
 # check integrity
-for local in locals_list:
-	check_finger_table_integrity(local.id(), local.finger_, hash_list)
+#for local in locals_list:
+#	check_finger_table_integrity(local.id(), local.finger_, hash_list)
 
 # check key lookup consistency
+print "check"*100
+l = []
+for peer in locals_list:
+	l.append((peer.predecessor().id(), peer.id()))
+
+l.sort()
+print map(lambda x: "[%s,%s)" % x, l)
+
 check_key_lookup(locals_list, hash_list)
+print "passed"*100
 
 # shutdown peers
 for local in locals_list:
