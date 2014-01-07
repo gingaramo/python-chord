@@ -194,7 +194,9 @@ class Local(object):
 
 		# start the daemons
 		self.daemons_ = {}
-		self.daemons_['run'] = Daemon(self, 'run')
+		self.daemons_['run_1'] = Daemon(self, 'run')
+		self.daemons_['run_2'] = Daemon(self, 'run')
+		self.daemons_['run_3'] = Daemon(self, 'run')
 		self.daemons_['fix_fingers'] = Daemon(self, 'fix_fingers')
 		self.daemons_['stabilize'] = Daemon(self, 'stabilize')
 		self.daemons_['distribute_data'] = Daemon(self, 'distribute_data')
@@ -229,23 +231,32 @@ class Local(object):
 			if self.shutdown_:
 				break
 
-			# We may have found that x is our new successor iff
-			# - x = pred(suc(n))
-			# - x exists
-			# - x is in range (n, suc(n))
-			# - [n+1, suc(n)) is non-empty
-			suc = self.successor()
-			# fix finger_[0] if successor failed
-			if suc.id() != self.finger_[0].id():
-				self.finger_[0] = suc
-			x = suc.predecessor()
-			if x != None and \
-			   inrange(x.id(), self.id(1), suc.id()) and \
-			   self.id(1) != suc.id() and \
-			   x.ping():
-				self.finger_[0] = x
-			# We notify our successor about us
-			suc.notify(self)
+			tries = 0
+			while tries < 4:
+				try:
+					# We may have found that x is our new successor iff
+					# - x = pred(suc(n))
+					# - x exists
+					# - x is in range (n, suc(n))
+					# - [n+1, suc(n)) is non-empty
+					suc = self.successor()
+					# fix finger_[0] if successor failed
+					if suc.id() != self.finger_[0].id():
+						self.finger_[0] = suc
+					x = suc.predecessor()
+					if x != None and \
+					   inrange(x.id(), self.id(1), suc.id()) and \
+					   self.id(1) != suc.id() and \
+					   x.ping():
+						self.finger_[0] = x
+					# We notify our successor about us
+					suc.notify(self)
+					break
+				except socket.error:
+					tries += 1
+			if tries == 4:
+				print "Stabilization issue, can continue to operate but unlikely to recover"
+
 
 	def notify(self, remote):
 		# Someone thinks they are our predecessor, they are iff
@@ -288,6 +299,7 @@ class Local(object):
 			time.sleep(random.random() * 5 + 2)
 			if self.shutdown_:
 				break
+
 			suc = self.successor()
 			if suc.id() == self.id():
 				continue
@@ -327,14 +339,22 @@ class Local(object):
 		return node.successor()
 
 	def find_predecessor(self, id):
-		node = self
-		# If we are alone in the ring, we are the pred(id)
-		if node.successor() == node:
-			return node
-		# While id is not in (n, suc(n)] we are not alone in the ring
-		while not inrange(id, node.id(1), node.successor().id(1)):
-			node = node.closest_preceding_finger(id)
-		return node
+		tries = 0
+		while tries < 4:
+			node = self
+			# If we are alone in the ring, we are the pred(id)
+			if node.successor().id() == node.id():
+				return node
+			# While id is not in (n, suc(n)] we are not alone in the ring
+			try:
+				while not inrange(id, node.id(1), node.successor().id(1)):
+					node = node.closest_preceding_finger(id)
+				return node
+			except socket.error:
+				# socket errors imply retry
+				tries += 1
+		print "Unable to solve query"
+		os.exit(-1)
 
 	def closest_preceding_finger(self, id):
 		for i in range(LOGSIZE-1,-1,-1):
