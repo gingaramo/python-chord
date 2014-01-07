@@ -93,6 +93,15 @@ class Remote(object):
 			print "bad result:'" + result + "' for '"+ self.last_msg_send_ +"'"
 			return None
 
+	def ping(self):
+		try:
+			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+			s.connect((self.address_.ip, self.address_.port))
+			s.close()
+			return True
+		except Exception:
+			return False
+
 	@requires_connection
 	def get(self, key):
 		self.send('get %s' % key)
@@ -197,6 +206,9 @@ class Local(object):
 		if self.socket_:
 			self.socket_.close()
 
+	def ping(self):
+		return True
+
 	def join(self, remote_address = None):
 		# initially just set successor
 		self.finger_ = list()
@@ -222,13 +234,18 @@ class Local(object):
 			# - x exists
 			# - x is in range (n, suc(n))
 			# - [n+1, suc(n)) is non-empty
-			x = self.successor().predecessor()
+			suc = self.successor()
+			# fix finger_[0] if successor failed
+			if suc.id() != self.finger_[0].id():
+				self.finger_[0] = suc
+			x = suc.predecessor()
 			if x != None and \
-			   inrange(x.id(), self.id(1), self.successor().id()) and \
-			   self.id(1) != self.successor().id():
+			   inrange(x.id(), self.id(1), suc.id()) and \
+			   self.id(1) != suc.id() and \
+			   x.ping():
 				self.finger_[0] = x
 			# We notify our successor about us
-			self.successor().notify(self)
+			suc.notify(self)
 
 	def notify(self, remote):
 		# Someone thinks they are our predecessor, they are iff
@@ -271,24 +288,30 @@ class Local(object):
 			time.sleep(random.random() * 5 + 2)
 			if self.shutdown_:
 				break
-			if self.successor().id() == self.id():
+			suc = self.successor()
+			if suc.id() == self.id():
 				continue
 
-			successors = [self.successor()]
-			suc_list = self.successor().get_successors()
+			successors = [suc]
+			suc_list = suc.get_successors()
 			if suc_list:
 				successors += suc_list
 			self.successors_ = successors
 
 	def get_successors(self):
-		print self.successors_
 		return map(lambda node: (node.address_.ip, node.address_.port), self.successors_)
 
 	def id(self, offset = 0):
 		return (self.address_.__hash__() + offset) % SIZE
 
 	def successor(self):
-		return self.finger_[0]
+		# We make sure to return an existing successor, there `might`
+		# be redundance between finger_[0] and successors_[0], but
+		# it doesn't harm
+		for remote in [self.finger_[0]] + self.successors_:
+			if remote.ping():
+				return remote
+		print "FUCK %s" % ([self.finger_[0]] + self.successors_)
 
 	def predecessor(self):
 		return self.predecessor_
@@ -315,7 +338,7 @@ class Local(object):
 
 	def closest_preceding_finger(self, id):
 		for i in range(LOGSIZE-1,-1,-1):
-			if self.finger_[i] != None and inrange(self.finger_[i].id(), self.id(1), id):
+			if self.finger_[i] != None and inrange(self.finger_[i].id(), self.id(1), id) and self.finger_[i].ping():
 				return self.finger_[i]
 		return self
 
@@ -331,7 +354,11 @@ class Local(object):
 
 	def run(self):
 		while 1:
-			conn, addr = self.socket_.accept()
+			try:
+				conn, addr = self.socket_.accept()
+			except Exception:
+				self.shutdown_ = True
+				break
 			request = conn.recv(1024)
 			# telnet connection
 			if request[-2:] == "\r\n":

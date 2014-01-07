@@ -47,7 +47,7 @@ for i in range(0, len(address_list)):
 	locals_list.append(local)
 	time.sleep(0.5)
 
-time.sleep(10)
+time.sleep(20)
 
 print "done creating peers, our pid %s is" % os.getpid()
 hash_list.sort()
