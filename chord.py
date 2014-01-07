@@ -10,6 +10,8 @@ import mutex
 LOGSIZE = 8
 # size of the ring
 SIZE = 1<<LOGSIZE
+# successors list size
+N_SUCCESSORS = 4
 
 # Helper function to determine if a key falls within a range
 def inrange(c, a, b):
@@ -89,19 +91,29 @@ class Remote(object):
 			return json.loads(result)
 		except Exception as e:
 			print "bad result:'" + result + "' for '"+ self.last_msg_send_ +"'"
-			raise e
+			return None
 
 	@requires_connection
 	def get(self, key):
 		self.send('get %s' % key)
-		response = self.recv()
 
+		response = self.recv()
 		return response['response']
 
 	@requires_connection
 	def set(self, key, value):
 		self.send('set %s %s' % (key, value))
-		
+
+	@requires_connection
+	def get_successors(self):
+		self.send('get_successors')
+
+		response = self.recv()
+		# if our next guy doesn't have successors, return empty list
+		if response == None:
+			return []
+		return map(lambda address: Remote(Address(address[0], address[1])) ,response[:N_SUCCESSORS-1])
+
 	@requires_connection
 	def successor(self):
 		self.send('get_successor')
@@ -137,10 +149,6 @@ class Remote(object):
 		return Remote(Address(response['ip'], response['port']))
 
 	@requires_connection
-	def update_finger_table(self, address, i):
-		self.send('update_finger_table %s %s %s' % (address.ip, address.port, i))
-
-	@requires_connection
 	def notify(self, node):
 		self.send('notify %s %s' % (node.address_.ip, node.address_.port))
 
@@ -169,6 +177,9 @@ class Local(object):
 		# set data to empty dictionary
 		self.data_ = {}
 
+		# list of successors
+		self.successors_ = []
+
 		# join the DHT
 		self.join(remote_address)
 
@@ -178,6 +189,7 @@ class Local(object):
 		self.daemons_['fix_fingers'] = Daemon(self, 'fix_fingers')
 		self.daemons_['stabilize'] = Daemon(self, 'stabilize')
 		self.daemons_['distribute_data'] = Daemon(self, 'distribute_data')
+		self.daemons_['update_successors'] = Daemon(self, 'update_successors')
 		for key in self.daemons_:
 			self.daemons_[key].start()
 
@@ -254,6 +266,24 @@ class Local(object):
 			for key in to_remove:
 				del self.data_[key]
 
+	def update_successors(self):
+		while 1:
+			time.sleep(random.random() * 5 + 2)
+			if self.shutdown_:
+				break
+			if self.successor().id() == self.id():
+				continue
+
+			successors = [self.successor()]
+			suc_list = self.successor().get_successors()
+			if suc_list:
+				successors += suc_list
+			self.successors_ = successors
+
+	def get_successors(self):
+		print self.successors_
+		return map(lambda node: (node.address_.ip, node.address_.port), self.successors_)
+
 	def id(self, offset = 0):
 		return (self.address_.__hash__() + offset) % SIZE
 
@@ -318,32 +348,22 @@ class Local(object):
 											 'port': self.predecessor_.address_.port}))
 				else:
 					conn.sendall(json.dumps({'response': -1}))
-
 			if request[0] == 'find_successor':
 				successor = self.find_successor(int(request[1]))
 				conn.sendall(json.dumps({'ip': successor.address_.ip,
 										 'port': successor.address_.port}))
-
 			if request[0] == 'closest_preceding_finger':
 				closest = self.closest_preceding_finger(int(request[1]))
 				conn.sendall(json.dumps({'ip': closest.address_.ip,
 										 'port': closest.address_.port}))
-
-			if request[0] == 'update_finger_table':
-				self.update_finger_table(Remote(Address(request[1], int(request[2]))), int(request[3]))
-			if request[0] == 'set_predecessor':
-				self.predecessor_ = Remote(Address(request[1], int(request[2])))
 			if request[0] == 'get':
 				conn.sendall(json.dumps({'response': self.get(request[1])}))
 			if request[0] == 'set':
 				self.set(request[1], request[2])
 			if request[0] == 'notify':
 				self.notify(Remote(Address(request[1], int(request[2]))))
-			if request[0] == 'print_finger_table':
-				res = {}
-				for i in range(0, LOGSIZE):
-					res[i] = "%s" % self.finger_[i].address_
-				conn.sendall(json.dumps(res))
+			if request[0] == 'get_successors':
+				conn.sendall(json.dumps(self.get_successors()))
 
 			conn.close()
 

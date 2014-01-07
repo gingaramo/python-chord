@@ -2,7 +2,7 @@ import os
 import time
 import socket
 import random
-from peer import *
+from chord import *
 
 
 def check_finger_table_integrity(id, finger_table, hash_list):
@@ -30,7 +30,7 @@ def check_key_lookup(peers, hash_list):
 
 
 # create addresses
-address_list = map(lambda addr: Address('127.0.0.1', addr), range(10400, 10700, 7))
+address_list = map(lambda addr: Address('127.0.0.1', addr), range(10100, 10400, 7))
 # keep unique ones
 address_list = sorted(set(address_list))
 # hash the addresses
@@ -68,6 +68,7 @@ print map(lambda x: "[%s,%s)" % x, l)
 
 check_key_lookup(locals_list, hash_list)
 print "passed"*100
+
 
 # shutdown peers
 for local in locals_list:
