@@ -30,7 +30,7 @@ def check_key_lookup(peers, hash_list):
 
 
 # create addresses
-address_list = map(lambda addr: Address('127.0.0.1', addr), range(11300, 11600, 7))
+address_list = map(lambda addr: Address('127.0.0.1', addr), range(10900, 11100, 7))
 # keep unique ones
 address_list = sorted(set(address_list))
 # hash the addresses
@@ -47,7 +47,7 @@ for i in range(0, len(address_list)):
 	locals_list.append(local)
 	time.sleep(0.5)
 
-time.sleep(20)
+time.sleep(10)
 
 print "done creating peers, our pid %s is" % os.getpid()
 hash_list.sort()
