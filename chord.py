@@ -99,7 +99,7 @@ class Remote(object):
 			s.connect((self.address_.ip, self.address_.port))
 			s.close()
 			return True
-		except Exception:
+		except socket.error:
 			return False
 
 	@requires_connection
@@ -121,7 +121,7 @@ class Remote(object):
 		# if our next guy doesn't have successors, return empty list
 		if response == None:
 			return []
-		return map(lambda address: Remote(Address(address[0], address[1])) ,response[:N_SUCCESSORS-1])
+		return map(lambda address: Remote(Address(address[0], address[1])) ,response)
 
 	@requires_connection
 	def successor(self):
@@ -172,6 +172,8 @@ class Daemon(threading.Thread):
 	def run(self):
 		getattr(self.obj_, self.method_)()
 
+
+
 # class representing a local peer
 class Local(object):
 	def __init__(self, local_address, remote_address = None):
@@ -194,9 +196,7 @@ class Local(object):
 
 		# start the daemons
 		self.daemons_ = {}
-		self.daemons_['run_1'] = Daemon(self, 'run')
-		self.daemons_['run_2'] = Daemon(self, 'run')
-		self.daemons_['run_3'] = Daemon(self, 'run')
+		self.daemons_['run'] = Daemon(self, 'run')
 		self.daemons_['fix_fingers'] = Daemon(self, 'fix_fingers')
 		self.daemons_['stabilize'] = Daemon(self, 'stabilize')
 		self.daemons_['distribute_data'] = Daemon(self, 'distribute_data')
@@ -213,33 +213,32 @@ class Local(object):
 
 	def join(self, remote_address = None):
 		# initially just set successor
-		self.finger_ = list()
-		for i in range(LOGSIZE):
-			self.finger_.append(None)
+		self.finger_ = map(lambda x: None, range(LOGSIZE))
 
 		self.predecessor_ = None
 
 		if remote_address:
 			remote = Remote(remote_address)
 			self.finger_[0] = remote.find_successor(self.id())
+			self.finger_[0].notify(self)
 		else:
 			self.finger_[0] = self
 
 	def stabilize(self):
 		while  1:
-			time.sleep(random.random() * 0.5 + 0.1)
+			time.sleep(random.random() + 1)
 			if self.shutdown_:
 				break
 
 			tries = 0
 			while tries < 4:
 				try:
+					suc = self.successor()
 					# We may have found that x is our new successor iff
 					# - x = pred(suc(n))
 					# - x exists
 					# - x is in range (n, suc(n))
 					# - [n+1, suc(n)) is non-empty
-					suc = self.successor()
 					# fix finger_[0] if successor failed
 					if suc.id() != self.finger_[0].id():
 						self.finger_[0] = suc
@@ -249,8 +248,8 @@ class Local(object):
 					   self.id(1) != suc.id() and \
 					   x.ping():
 						self.finger_[0] = x
-					# We notify our successor about us
-					suc.notify(self)
+					# We notify our new successor about us
+					self.successor().notify(self)
 					break
 				except socket.error:
 					tries += 1
@@ -263,13 +262,19 @@ class Local(object):
 		# - we don't have a predecessor
 		# OR
 		# - the new node r is in the range (pred(n), n)
-		if self.predecessor() == None or \
-		   inrange(remote.id(), self.predecessor().id(1), self.id()):
-			self.predecessor_ = remote
+		# OR
+		# - our previous predecessor is dead
+		try:
+			if self.predecessor() == None or \
+			   inrange(remote.id(), self.predecessor().id(1), self.id()) or \
+			   not self.predecessor().ping():
+				self.predecessor_ = remote
+		except socket.error:
+			pass
 
 	def fix_fingers(self):
 		while 1:
-			time.sleep(random.random() * 0.5 + 0.1)
+			time.sleep(random.random() + 1)
 			if self.shutdown_:
 				break
 			# Randomly select an entry in finger_ table and update its value
@@ -286,32 +291,42 @@ class Local(object):
 			for key in self.data_:
 				if self.predecessor() and \
 				   not inrange(hash(key), self.predecessor().id(1), self.id()):
-				   node = self.find_successor(hash(key))
-				   node.set(key, self.data_[key])
-				   print "moved %s into %s" % (key, node.id())
-				   to_remove.append(key)
-			# remove all we don't own
+					try:
+						node = self.find_successor(hash(key))
+						node.set(key, self.data_[key])
+						print "moved %s into %s" % (key, node.id())
+						to_remove.append(key)
+					except socket.error:
+						# we'll migrate it next time
+						pass
+			# remove all we don't own or failed to move
 			for key in to_remove:
 				del self.data_[key]
 
 	def update_successors(self):
 		while 1:
-			time.sleep(random.random() * 5 + 2)
+			time.sleep(random.random() * 5 + 1)
 			if self.shutdown_:
 				break
 
-			suc = self.successor()
-			if suc.id() == self.id():
-				continue
+			try:
+				suc = self.successor()
+				# if we are alone in the ring, pass
+				if suc.id() == self.id():
+					continue
 
-			successors = [suc]
-			suc_list = suc.get_successors()
-			if suc_list:
-				successors += suc_list
-			self.successors_ = successors
+				successors = [suc]
+				suc_list = suc.get_successors()
+				if suc_list and len(suc_list):
+					successors += suc_list
+				# if everything worked, we update
+				self.successors_ = successors
+			except socket.error:
+				# next time should work
+				pass
 
 	def get_successors(self):
-		return map(lambda node: (node.address_.ip, node.address_.port), self.successors_)
+		return map(lambda node: (node.address_.ip, node.address_.port), self.successors_[:N_SUCCESSORS-1])
 
 	def id(self, offset = 0):
 		return (self.address_.__hash__() + offset) % SIZE
@@ -323,7 +338,8 @@ class Local(object):
 		for remote in [self.finger_[0]] + self.successors_:
 			if remote.ping():
 				return remote
-		print "FUCK %s" % ([self.finger_[0]] + self.successors_)
+		print "No successor available, aborting"
+		os.exit(-1)
 
 	def predecessor(self):
 		return self.predecessor_
@@ -376,7 +392,7 @@ class Local(object):
 		while 1:
 			try:
 				conn, addr = self.socket_.accept()
-			except Exception:
+			except socket.error:
 				self.shutdown_ = True
 				break
 			request = conn.recv(1024)

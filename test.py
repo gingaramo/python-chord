@@ -30,7 +30,7 @@ def check_key_lookup(peers, hash_list):
 
 
 # create addresses
-address_list = map(lambda addr: Address('127.0.0.1', addr), range(10100, 10400, 7))
+address_list = map(lambda addr: Address('127.0.0.1', addr), range(11300, 11600, 7))
 # keep unique ones
 address_list = sorted(set(address_list))
 # hash the addresses
