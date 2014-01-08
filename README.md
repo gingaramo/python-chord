@@ -8,7 +8,7 @@ Currently supports concurrent addition of peers into the network and node failur
 Some key lookup consistency test implemented in test.py, and nodes distribute keys accordingly to node joins.
 
 ### How to test?
-- `$>python test.py` to check consistency.
+- `$>python test.py` to check consistency. Tests can fail due to the fact that the network is not stable yet (on consistency check), or that the new value was overriden by old value (on fusser test).
 - `$>python create_chord.py $N_CHORD_NODES` to run a DHT that lets you ask questions to random members.
 
 ### What's next?

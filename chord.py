@@ -297,11 +297,13 @@ class Local(object):
 		# Keep calling us
 		return True
 
-	@repeat_and_sleep(1)
+	@repeat_and_sleep(0.25)
 	def distribute_data(self):
 		# make sure that we own all the keys else
 		to_remove = []
-		for key in self.data_:
+		# to prevent from RE in case data gets updated by other thread
+		keys = self.data_.keys()
+		for key in keys:
 			if self.predecessor() and \
 			   not inrange(hash(key), self.predecessor().id(1), self.id(1)):
 				try:

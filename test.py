@@ -5,19 +5,8 @@ import random
 from chord import *
 
 
-def check_finger_table_integrity(id, finger_table, hash_list):
-	print "checking the finger table integrity of %s" % id
-	for i in range(0, LOGSIZE):
-		finger_id = finger_table[i].id()
-		# finger_id is in [id + 2^i, id)
-		assert inrange(finger_id, (id + (1<<i)) % SIZE, id)
-		for j in range(0, len(hash_list)):
-			if (hash_list[j] == finger_id):
-				continue
-			# there's no other finger in between
-			assert (id + (1<<i)) % SIZE == finger_id or not inrange(hash_list[j], (id + (1<<i)) % SIZE, finger_id)
-
 def check_key_lookup(peers, hash_list):
+	print "Running key lookup consistency test"
 	for key in range(SIZE):
 		# select random node
 		node = peers[random.randrange(len(peers))]
@@ -25,16 +14,52 @@ def check_key_lookup(peers, hash_list):
 		target = node.find_successor(key)
 		for i in range(len(peers)):
 			if inrange(key, hash_list[i]+1, hash_list[(i+1)%len(peers)]+1):
-				print "key: %s, target id : %s, should be : %s" % (key, target.id(), hash_list[(1+i)%len(peers)])
-				assert target.id() == hash_list[(i+1)%len(peers)]
+				tries = 1
+				while 1:
+					try:
+						assert target.id() == hash_list[(i+1)%len(peers)]
+						break
+					except Exception, e:
+						print "Fail number %s, %s to abort" % (tries, 4-tries)
+						tries += 1
+						if tries > 4:
+							raise e
+						time.sleep(1.5 ** tries)
+	print "Finished key lookup consistency test, all good"
 
+
+def data_fusser(peers):
+	print "Running data fusser trying to detect failures"
+	data = {}
+	for i in range(1000):
+		if random.random() < 0.4 and len(data.keys()):
+			key = data.keys()[random.randrange(len(data.keys()))]
+			tries = 0
+			while 1:
+				try:
+					assert peers[random.randrange(len(peers))].get(key) == data[key]
+					break
+				except Exception, e:
+					time.sleep(1<<tries)
+					tries += 1
+					if tries == 5:
+						print "We are failing on run %i" % i
+						print "Expected : '%s', got '%s'" % (data[key], peers[random.randrange(len(peers))].get(key))
+						raise e
+		else:
+			key = str(random.randrange(1000))
+			value = str(random.randrange(1000))
+			data[key] = value
+			peers[random.randrange(len(peers))].set(key, value)
+	print "Finished running data fusser, all good"
 
 # create addresses
-address_list = map(lambda addr: Address('127.0.0.1', addr), range(10900, 11100, 7))
+address_list = map(lambda addr: Address('127.0.0.1', addr), range(15600, 15700, 7))
 # keep unique ones
 address_list = sorted(set(address_list))
 # hash the addresses
 hash_list 	 = map(lambda addr: addr.__hash__(), address_list)
+hash_list.sort()
 # create the nodes
 locals_list   = []
 for i in range(0, len(address_list)):
@@ -45,30 +70,18 @@ for i in range(0, len(address_list)):
 		# as a remote
 		local = Local(address_list[i], locals_list[random.randrange(len(locals_list))].address_)
 	locals_list.append(local)
-	time.sleep(0.5)
+	time.sleep(0.1)
 
-time.sleep(10)
+# We need to give it some time to stabilize
+time.sleep(20)
 
-print "done creating peers, our pid %s is" % os.getpid()
-hash_list.sort()
-print hash_list
-
-# check integrity
-#for local in locals_list:
-#	check_finger_table_integrity(local.id(), local.finger_, hash_list)
+print "done creating peers, our pid is %s (for `kill -9`)" % os.getpid()
 
 # check key lookup consistency
-print "check"*100
-l = []
-for peer in locals_list:
-	l.append((peer.predecessor().id(), peer.id()))
-
-l.sort()
-print map(lambda x: "[%s,%s)" % x, l)
-
 check_key_lookup(locals_list, hash_list)
-print "passed"*100
 
+# check data consistency with fuzzer
+data_fusser(locals_list)
 
 # shutdown peers
 for local in locals_list:
