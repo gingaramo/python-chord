@@ -7,6 +7,10 @@ Currently supports concurrent addition of peers into the network and node failur
 
 Some key lookup consistency test implemented in test.py, and nodes distribute keys accordingly to node joins.
 
+### How to test?
+- `$>python test.py` to check consistency.
+- `$>python create_chord.py $N_CHORD_NODES` to run a DHT that lets you ask questions to random members.
+
 ### What's next?
 
 - Implement some source of replication
