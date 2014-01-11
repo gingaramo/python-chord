@@ -8,7 +8,7 @@ import time
 import mutex
 
 # log size of the ring
-LOGSIZE = 8
+LOGSIZE = 15
 # size of the ring
 SIZE = 1<<LOGSIZE
 # successors list size
@@ -56,6 +56,17 @@ def requires_connection(func):
 		return ret
 	return inner
 
+# reads from socket until "\r\n"
+def read_from_socket(s):
+	result = ""
+	while 1:
+		data = s.recv(256)
+		if data[-2:] == "\r\n":
+			result += data[:-2]
+			break
+		result += data
+	return result
+
 # class representing a remote peer
 class Remote(object):
 	def __init__(self, remote_address):
@@ -77,27 +88,20 @@ class Remote(object):
 		return (self.address_.__hash__() + offset) % SIZE
 
 	def send(self, msg):
-		self.socket_.sendall(msg)
+		self.socket_.sendall(msg + "\r\n")
 		self.last_msg_send_ = msg
 		# print "send: %s <%s>" % (msg, self.address_)
 
 	def recv(self):
-		result = ""
-		while 1:
-			data = self.socket_.recv(256)
-			if len(data) == 0:
-				break
-			result += data
-		try:
-			return json.loads(result)
-		except Exception as e:
-			print "bad result:'" + result + "' for '"+ self.last_msg_send_ +"'"
-			return None
+		# we use to have more complicated logic here
+		# and we might have again, so I'm not getting rid of this yet
+		return read_from_socket(self.socket_)
 
 	def ping(self):
 		try:
 			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			s.connect((self.address_.ip, self.address_.port))
+			s.sendall("\r\n")
 			s.close()
 			return True
 		except socket.error:
@@ -108,7 +112,7 @@ class Remote(object):
 		self.send('get %s' % key)
 
 		response = self.recv()
-		return response['response']
+		return response
 
 	@requires_connection
 	def set(self, key, value):
@@ -120,15 +124,16 @@ class Remote(object):
 
 		response = self.recv()
 		# if our next guy doesn't have successors, return empty list
-		if response == None:
+		if response == "":
 			return []
+		response = json.loads(response)
 		return map(lambda address: Remote(Address(address[0], address[1])) ,response)
 
 	@requires_connection
 	def successor(self):
 		self.send('get_successor')
 
-		response = self.recv()
+		response = json.loads(self.recv())
 		return Remote(Address(response['ip'], response['port']))
 
 	@requires_connection
@@ -136,26 +141,23 @@ class Remote(object):
 		self.send('get_predecessor')
 
 		response = self.recv()
-		if 'ip' in response and 'port' in response:
-			return Remote(Address(response['ip'], response['port']))
-		return None
+		if response == "":
+			return None
+		response = json.loads(response)
+		return Remote(Address(response['ip'], response['port']))
 
 	@requires_connection
 	def find_successor(self, id):
 		self.send('find_successor %s' % id)
 
-		response = self.recv()
+		response = json.loads(self.recv())
 		return Remote(Address(response['ip'], response['port']))
-
-	@requires_connection
-	def set_predecessor(self, address):
-		self.send('set_predecessor %s %s' % (address.ip, address.port))
 
 	@requires_connection
 	def closest_preceding_finger(self, id):
 		self.send('closest_preceding_finger %s' % id)
 
-		response = self.recv()
+		response = json.loads(self.recv())
 		return Remote(Address(response['ip'], response['port']))
 
 	@requires_connection
@@ -289,7 +291,7 @@ class Local(object):
 		   not self.predecessor().ping():
 			self.predecessor_ = remote
 
-	@repeat_and_sleep(1)
+	@repeat_and_sleep(4)
 	def fix_fingers(self):
 		# Randomly select an entry in finger_ table and update its value
 		i = random.randrange(LOGSIZE - 1) + 1
@@ -297,7 +299,7 @@ class Local(object):
 		# Keep calling us
 		return True
 
-	@repeat_and_sleep(0.25)
+	@repeat_and_sleep(30)
 	def distribute_data(self):
 		# make sure that we own all the keys else
 		to_remove = []
@@ -309,7 +311,7 @@ class Local(object):
 				try:
 					node = self.find_successor(hash(key))
 					node.set(key, self.data_[key])
-					print "moved %s into %s" % (key, node.id())
+					# print "moved %s into %s" % (key, node.id())
 					to_remove.append(key)
 				except socket.error:
 					# we'll migrate it next time
@@ -320,7 +322,7 @@ class Local(object):
 		# Keep calling us
 		return True
 
-	@repeat_and_sleep(1)
+	@repeat_and_sleep(5)
 	@retry_on_socket_error(6)
 	def update_successors(self):
 		suc = self.successor()
@@ -392,10 +394,10 @@ class Local(object):
 			# not in our range
 			if not inrange(hash(key) % SIZE, self.predecessor().id(1), self.id(1)):
 				return self.find_successor(hash(key)).get(key)
-			return None
+			return ""
 
 	def set(self, key, value):
-		print "key %s with value %s set here" % (key, value)
+		# print "key %s with value %s set here" % (key, value)
 		self.data_[key] = value
 
 	def run(self):
@@ -405,38 +407,42 @@ class Local(object):
 			except socket.error:
 				self.shutdown_ = True
 				break
-			request = conn.recv(1024)
-			# telnet connection
-			if request[-2:] == "\r\n":
-				request = request[:-2]
 
-			#print "recv: '%s' <%s>" % (request, addr)
-			request = request.split(' ')
+			# split by spaces, we might have to join later though
+			request = read_from_socket(conn).split(' ')
+
 			if request[0] == 'get_successor':
 				conn.sendall(json.dumps({'ip': self.successor().address_.ip,
-										 'port': self.successor().address_.port}))
+										 'port': self.successor().address_.port}) +
+							 "\r\n")
 			if request[0] == 'get_predecessor':
 				if self.predecessor_ != None:
 					conn.sendall(json.dumps({'ip': self.predecessor_.address_.ip,
-											 'port': self.predecessor_.address_.port}))
+											 'port': self.predecessor_.address_.port})+
+							 "\r\n")
 				else:
-					conn.sendall(json.dumps({'response': -1}))
+					conn.sendall(json.dumps("")+
+							 "\r\n")
 			if request[0] == 'find_successor':
 				successor = self.find_successor(int(request[1]))
 				conn.sendall(json.dumps({'ip': successor.address_.ip,
-										 'port': successor.address_.port}))
+										 'port': successor.address_.port})+
+							 "\r\n")
 			if request[0] == 'closest_preceding_finger':
 				closest = self.closest_preceding_finger(int(request[1]))
 				conn.sendall(json.dumps({'ip': closest.address_.ip,
-										 'port': closest.address_.port}))
+										 'port': closest.address_.port})+
+							 "\r\n")
 			if request[0] == 'get':
-				conn.sendall(json.dumps({'response': self.get(request[1])}))
+				conn.sendall(self.get(request[1])+
+							 "\r\n")
 			if request[0] == 'set':
-				self.set(request[1], request[2])
+				self.set(request[1], " ".join(request[2:]))
 			if request[0] == 'notify':
 				self.notify(Remote(Address(request[1], int(request[2]))))
 			if request[0] == 'get_successors':
-				conn.sendall(json.dumps(self.get_successors()))
+				conn.sendall(json.dumps(self.get_successors())+
+							 "\r\n")
 
 			conn.close()
 

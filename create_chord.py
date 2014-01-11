@@ -46,6 +46,6 @@ while 1:
 		address = address_list[random.randrange(len(address_list))]
 		s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		s.connect((address.ip, address.port))
-		s.sendall(command)
-		print "Response : '%s'" % s.recv(1024)
+		s.sendall(command + "\r\n")
+		print "Response : '%s'" % s.recv(10000)
 		s.close()
