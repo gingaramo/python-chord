@@ -7,173 +7,10 @@ import random
 import time
 import mutex
 
-# log size of the ring
-LOGSIZE = 15
-# size of the ring
-SIZE = 1<<LOGSIZE
-# successors list size
-N_SUCCESSORS = 4
-
-# Helper function to determine if a key falls within a range
-def inrange(c, a, b):
-	# is c in [a,b)?, if a == b then it assumes a full circle
-	# on the DHT, so it returns True.
-	a = a % SIZE
-	b = b % SIZE
-	c = c % SIZE
-	if a < b:
-		return a <= c and c < b
-	return a <= c or c < b
-
-class Address(object):
-	def __init__(self, ip, port):
-		self.ip = ip
-		self.port = int(port)
-
-	def __hash__(self):
-		return hash(("%s:%s" % (self.ip, self.port))) % SIZE
-
-	def __cmp__(self, other):
-		return other.__hash__() < self.__hash__()
-
-	def __eq__(self, other):
-		return other.__hash__() == self.__hash__()
-
-	def __str__(self):
-		return "<%s>:%s" % (self.ip, self.port)
-
-# decorator
-def requires_connection(func):
-	""" initiates and cleans up connections with remote server """
-	def inner(self, *args, **kwargs):
-		self.mutex_.acquire()
-
-		self.open_connection()
-		ret = func(self, *args, **kwargs)
-		self.close_connection()
-		self.mutex_.release()
-
-		return ret
-	return inner
-
-# reads from socket until "\r\n"
-def read_from_socket(s):
-	result = ""
-	while 1:
-		data = s.recv(256)
-		if data[-2:] == "\r\n":
-			result += data[:-2]
-			break
-		result += data
-	return result
-
-# class representing a remote peer
-class Remote(object):
-	def __init__(self, remote_address):
-		self.address_ = remote_address
-		self.mutex_ = threading.Lock()
-
-	def open_connection(self):
-		self.socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.socket_.connect((self.address_.ip, self.address_.port))
-
-	def close_connection(self):
-		self.socket_.close()
-		self.socket_ = None
-
-	def __str__(self):
-		return "Remote %s" % self.address_
-
-	def id(self, offset = 0):
-		return (self.address_.__hash__() + offset) % SIZE
-
-	def send(self, msg):
-		self.socket_.sendall(msg + "\r\n")
-		self.last_msg_send_ = msg
-		# print "send: %s <%s>" % (msg, self.address_)
-
-	def recv(self):
-		# we use to have more complicated logic here
-		# and we might have again, so I'm not getting rid of this yet
-		return read_from_socket(self.socket_)
-
-	def ping(self):
-		try:
-			s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			s.connect((self.address_.ip, self.address_.port))
-			s.sendall("\r\n")
-			s.close()
-			return True
-		except socket.error:
-			return False
-
-	@requires_connection
-	def get(self, key):
-		self.send('get %s' % key)
-
-		response = self.recv()
-		return response
-
-	@requires_connection
-	def set(self, key, value):
-		self.send('set %s %s' % (key, value))
-
-	@requires_connection
-	def get_successors(self):
-		self.send('get_successors')
-
-		response = self.recv()
-		# if our next guy doesn't have successors, return empty list
-		if response == "":
-			return []
-		response = json.loads(response)
-		return map(lambda address: Remote(Address(address[0], address[1])) ,response)
-
-	@requires_connection
-	def successor(self):
-		self.send('get_successor')
-
-		response = json.loads(self.recv())
-		return Remote(Address(response['ip'], response['port']))
-
-	@requires_connection
-	def predecessor(self):
-		self.send('get_predecessor')
-
-		response = self.recv()
-		if response == "":
-			return None
-		response = json.loads(response)
-		return Remote(Address(response['ip'], response['port']))
-
-	@requires_connection
-	def find_successor(self, id):
-		self.send('find_successor %s' % id)
-
-		response = json.loads(self.recv())
-		return Remote(Address(response['ip'], response['port']))
-
-	@requires_connection
-	def closest_preceding_finger(self, id):
-		self.send('closest_preceding_finger %s' % id)
-
-		response = json.loads(self.recv())
-		return Remote(Address(response['ip'], response['port']))
-
-	@requires_connection
-	def notify(self, node):
-		self.send('notify %s %s' % (node.address_.ip, node.address_.port))
-
-
-# deamon to run local's run method
-class Daemon(threading.Thread):
-	def __init__(self, obj, method):
-		threading.Thread.__init__(self)
-		self.obj_ = obj
-		self.method_ = method
-
-	def run(self):
-		getattr(self.obj_, self.method_)()
+from address import Address, inrange
+from remote import Remote
+from settings import *
+from network import *
 
 def repeat_and_sleep(sleep_time):
 	def decorator(func):
@@ -206,6 +43,16 @@ def retry_on_socket_error(retry_limit):
 				os.exit(-1)
 		return inner
 	return decorator
+
+# deamon to run Local's run method
+class Daemon(threading.Thread):
+	def __init__(self, obj, method):
+		threading.Thread.__init__(self)
+		self.obj_ = obj
+		self.method_ = method
+
+	def run(self):
+		getattr(self.obj_, self.method_)()
 
 # class representing a local peer
 class Local(object):
@@ -256,8 +103,8 @@ class Local(object):
 		else:
 			self.finger_[0] = self
 
-	@repeat_and_sleep(1)
-	@retry_on_socket_error(4)
+	@repeat_and_sleep(STABILIZE_INT)
+	@retry_on_socket_error(STABILIZE_RET)
 	def stabilize(self):
 		suc = self.successor()
 		# We may have found that x is our new successor iff
@@ -291,7 +138,7 @@ class Local(object):
 		   not self.predecessor().ping():
 			self.predecessor_ = remote
 
-	@repeat_and_sleep(4)
+	@repeat_and_sleep(FIX_FINGERS_INT)
 	def fix_fingers(self):
 		# Randomly select an entry in finger_ table and update its value
 		i = random.randrange(LOGSIZE - 1) + 1
@@ -299,7 +146,7 @@ class Local(object):
 		# Keep calling us
 		return True
 
-	@repeat_and_sleep(30)
+	@repeat_and_sleep(DISTRIBUTE_DATA_INT)
 	def distribute_data(self):
 		# make sure that we own all the keys else
 		to_remove = []
@@ -322,8 +169,8 @@ class Local(object):
 		# Keep calling us
 		return True
 
-	@repeat_and_sleep(5)
-	@retry_on_socket_error(6)
+	@repeat_and_sleep(UPDATE_SUCCESSORS_INT)
+	@retry_on_socket_error(UPDATE_SUCCESSORS_RET)
 	def update_successors(self):
 		suc = self.successor()
 		# if we are not alone in the ring, calculate
@@ -356,7 +203,7 @@ class Local(object):
 	def predecessor(self):
 		return self.predecessor_
 
-	@retry_on_socket_error(3)
+	@retry_on_socket_error(FIND_SUCCESSOR_RET)
 	def find_successor(self, id):
 		# The successor of a key can be us iff
 		# - we have a pred(n)
@@ -367,7 +214,7 @@ class Local(object):
 		node = self.find_predecessor(id)
 		return node.successor()
 
-	@retry_on_socket_error(3)
+	@retry_on_socket_error(FIND_PREDECESSOR_RET)
 	def find_predecessor(self, id):
 		node = self
 		# If we are alone in the ring, we are the pred(id)
@@ -386,7 +233,6 @@ class Local(object):
 				return remote
 		return self
 
-	@retry_on_socket_error(3)
 	def get(self, key):
 		try:
 			return self.data_[key]
@@ -408,14 +254,14 @@ class Local(object):
 				self.shutdown_ = True
 				break
 
-			# split by spaces, we might have to join later though
-			request = read_from_socket(conn).split(' ')
+			request = read_from_socket(conn)
+			command = request.split(' ')[0]
 
-			if request[0] == 'get_successor':
+			if command == 'get_successor':
 				conn.sendall(json.dumps({'ip': self.successor().address_.ip,
 										 'port': self.successor().address_.port}) +
 							 "\r\n")
-			if request[0] == 'get_predecessor':
+			if command == 'get_predecessor':
 				if self.predecessor_ != None:
 					conn.sendall(json.dumps({'ip': self.predecessor_.address_.ip,
 											 'port': self.predecessor_.address_.port})+
@@ -423,26 +269,27 @@ class Local(object):
 				else:
 					conn.sendall(json.dumps("")+
 							 "\r\n")
-			if request[0] == 'find_successor':
+			if command == 'find_successor':
 				successor = self.find_successor(int(request[1]))
 				conn.sendall(json.dumps({'ip': successor.address_.ip,
 										 'port': successor.address_.port})+
 							 "\r\n")
-			if request[0] == 'closest_preceding_finger':
+			if command == 'closest_preceding_finger':
 				closest = self.closest_preceding_finger(int(request[1]))
 				conn.sendall(json.dumps({'ip': closest.address_.ip,
 										 'port': closest.address_.port})+
 							 "\r\n")
-			if request[0] == 'get':
-				conn.sendall(self.get(request[1])+
-							 "\r\n")
-			if request[0] == 'set':
-				self.set(request[1], " ".join(request[2:]))
-			if request[0] == 'notify':
+			if command == 'notify':
 				self.notify(Remote(Address(request[1], int(request[2]))))
-			if request[0] == 'get_successors':
+			if command == 'get_successors':
 				conn.sendall(json.dumps(self.get_successors())+
 							 "\r\n")
+
+			if command == 'get':
+				conn.sendall(self.get(request[1])+
+							 "\r\n")
+			if command == 'set':
+				self.set(request[1], " ".join(request[2:]))
 
 			conn.close()
 
@@ -450,19 +297,6 @@ class Local(object):
 				self.socket_.close()
 				self.shutdown_ = True
 				break
-
-# data structure that represents a distributed hash table
-class DHT(threading.Thread):
-	def __init__(self, local_address, remote_address = None):
-		self.local_ = Local(local_address, remote_address)
-
-	def get(self, key):
-		remote = self.local_.find_successor(hash(key))
-		return remote.get(key)
-
-	def set(self, key, value):
-		remote = self.local_.find_successor(hash(key))
-		remote.set(key, value)
 
 if __name__ == "__main__":
 	import sys

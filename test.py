@@ -54,7 +54,7 @@ def data_fusser(peers):
 	print "Finished running data fusser, all good"
 
 # create addresses
-address_list = map(lambda addr: Address('127.0.0.1', addr), range(15600, 15700, 7))
+address_list = map(lambda addr: Address('127.0.0.1', addr), range(15900, 16000, 7))
 # keep unique ones
 address_list = sorted(set(address_list))
 # hash the addresses

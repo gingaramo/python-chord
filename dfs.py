@@ -66,32 +66,6 @@ class MyStat(fuse.Stat):
         self.st_ctime = 0
 
 
-#BEGIN serialization-deseralization routines
-def get(path):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(('127.0.0.1', PORT))
-    s.sendall("get %s\r\n" % path)
-    result = ""
-    while 1:
-        data = s.recv(256)
-        if data[-2:] == "\r\n":
-            result += data[:-2]
-            break
-        result += data
-
-    s.close()
-    if result == "":
-        return None
-    else:
-        return json.loads(result)
-
-def put(path, obj):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect(('127.0.0.1', PORT))
-    s.sendall("set %s %s\r\n" % (path, json.dumps(obj)))
-    s.close()
-#END serialization-deseralization routines
-
 # logging function
 def log(info):
     f = open("/tmp/dfs.log", "a+")
@@ -110,8 +84,9 @@ def logtofile(func):
 
 
 class DFS(fuse.Fuse):
-    def __init__(self, *args, **kw):
+    def __init__(self, dht, *args, **kw):
         fuse.Fuse.__init__(self, *args, **kw)
+        self.dht_ = dht
 
     # helper function to eliminate duplicated code
     def get_offsets(self, offset, size):
@@ -119,6 +94,32 @@ class DFS(fuse.Fuse):
         start = offset % BLOCK_SIZE
         end = min(start + size, BLOCK_SIZE)
         return (block_offset, start, end)
+
+    # returns object representing a file/folder or None if it doesn't exist
+    def get(path):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(('127.0.0.1', PORT))
+        s.sendall("get %s\r\n" % path)
+        result = ""
+        while 1:
+            data = s.recv(256)
+            if data[-2:] == "\r\n":
+                result += data[:-2]
+                break
+            result += data
+
+        s.close()
+        if result == "":
+            return None
+        else:
+            return json.loads(result)
+
+    # saves the given object serialized on the DHT
+    def put(path, obj):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(('127.0.0.1', PORT))
+        s.sendall("set %s %s\r\n" % (path, json.dumps(obj)))
+        s.close()
 
     # This is the guy responsible of making our FS visible to linux
     @logtofile
@@ -154,13 +155,12 @@ class DFS(fuse.Fuse):
             # to find the las block. This could be improved a lot with different
             # algorithms or ideas.
             left = 0
-            right = (1<<32)/4096
+            right = (1<<32)/BLOCK_SIZE
             while left + 1 < right:
                 mid = (left + right) / 2
-                offsets = self.get_offsets(mid * 4096, 1)
+                offsets = self.get_offsets(mid * BLOCK_SIZE, 1)
                 key = "%s:%s" %(path[1:], offsets[0])
                 block = get(key)
-                log("trying %s" % key)
                 if block != None:
                     left = mid
                 else:
@@ -169,7 +169,7 @@ class DFS(fuse.Fuse):
             # at block 'left'
             key = "%s:%s" %(path[1:], left)
             block = get(key)
-            size = left * 4096 + len(base64.b64decode(block['data']['b64_data']))
+            size = left * BLOCK_SIZE + len(base64.b64decode(block['data']['b64_data']))
 
             st.st_size = size
         return st
