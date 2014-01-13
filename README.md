@@ -7,7 +7,7 @@ Its base class is `Local`, located in chord.py. It provides the overlay network 
 a lookup operation. Other commands such as 'get' or 'put' are provided by the top
 layers using Chord by registering those commands (take a look at dht.py). This provides
 enough flexibility to add replication, re-distribution of keys/load, custom protocols, 
-etc. in a simple and easy way by means of 'agents' (will be implemented soon).
+etc.
 
 Currently supports concurrent addition of peers into the network and can handle node
 failures / leave. Key lookup consistency test implemented in test.py.
