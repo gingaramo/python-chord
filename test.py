@@ -27,7 +27,7 @@ def check_key_lookup(peers, hash_list):
 						time.sleep(1.5 ** tries)
 	print "Finished key lookup consistency test, all good"
 
-
+"""
 def data_fusser(peers):
 	print "Running data fusser trying to detect failures"
 	data = {}
@@ -52,9 +52,10 @@ def data_fusser(peers):
 			data[key] = value
 			peers[random.randrange(len(peers))].set(key, value)
 	print "Finished running data fusser, all good"
+"""
 
 # create addresses
-address_list = map(lambda addr: Address('127.0.0.1', addr), range(15900, 16000, 7))
+address_list = map(lambda addr: Address('127.0.0.1', addr), list(set(map(lambda x: random.randrange(40000,50000), range(10)))))
 # keep unique ones
 address_list = sorted(set(address_list))
 # hash the addresses
@@ -63,12 +64,16 @@ hash_list.sort()
 # create the nodes
 locals_list   = []
 for i in range(0, len(address_list)):
-	if len(locals_list) == 0:
-		local = Local(address_list[i])
-	else:
-		# use a random already created peer's address
-		# as a remote
-		local = Local(address_list[i], locals_list[random.randrange(len(locals_list))].address_)
+	try:
+		if len(locals_list) == 0:
+			local = Local(address_list[i])
+		else:
+			# use a random already created peer's address
+			# as a remote
+			local = Local(address_list[i], locals_list[random.randrange(len(locals_list))].address_)
+	except socket.error: # socket bussy
+		del hash_list[address_list[i].__hash__()]
+	local.start()
 	locals_list.append(local)
 	time.sleep(0.1)
 
@@ -81,11 +86,11 @@ print "done creating peers, our pid is %s (for `kill -9`)" % os.getpid()
 check_key_lookup(locals_list, hash_list)
 
 # check data consistency with fuzzer
-data_fusser(locals_list)
+#data_fusser(locals_list)
 
 # shutdown peers
 for local in locals_list:
 	msocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	msocket.connect((local.address_.ip, local.address_.port))
-	msocket.sendall('shutdown')
+	msocket.sendall('shutdown\r\n')
 	msocket.close()

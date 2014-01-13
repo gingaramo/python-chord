@@ -6,17 +6,6 @@ from address import Address
 from settings import SIZE
 from network import *
 
-# reads from socket until "\r\n"
-def read_from_socket(s):
-	result = ""
-	while 1:
-		data = s.recv(256)
-		if data[-2:] == "\r\n":
-			result += data[:-2]
-			break
-		result += data
-	return result
-
 # decorator to thread-safe Remote's socket
 def requires_connection(func):
 	""" initiates and cleans up connections with remote server """
@@ -72,15 +61,10 @@ class Remote(object):
 			return False
 
 	@requires_connection
-	def get(self, key):
-		self.send('get %s' % key)
-
+	def command(self, msg):
+		self.send(msg)
 		response = self.recv()
 		return response
-
-	@requires_connection
-	def set(self, key, value):
-		self.send('set %s %s' % (key, value))
 
 	@requires_connection
 	def get_successors(self):
@@ -98,7 +82,7 @@ class Remote(object):
 		self.send('get_successor')
 
 		response = json.loads(self.recv())
-		return Remote(Address(response['ip'], response['port']))
+		return Remote(Address(response[0], response[1]))
 
 	@requires_connection
 	def predecessor(self):
@@ -108,21 +92,21 @@ class Remote(object):
 		if response == "":
 			return None
 		response = json.loads(response)
-		return Remote(Address(response['ip'], response['port']))
+		return Remote(Address(response[0], response[1]))
 
 	@requires_connection
 	def find_successor(self, id):
 		self.send('find_successor %s' % id)
 
 		response = json.loads(self.recv())
-		return Remote(Address(response['ip'], response['port']))
+		return Remote(Address(response[0], response[1]))
 
 	@requires_connection
 	def closest_preceding_finger(self, id):
 		self.send('closest_preceding_finger %s' % id)
 
 		response = json.loads(self.recv())
-		return Remote(Address(response['ip'], response['port']))
+		return Remote(Address(response[0], response[1]))
 
 	@requires_connection
 	def notify(self, node):

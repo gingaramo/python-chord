@@ -1,5 +1,5 @@
 #!/bin/python
-import os
+import sys
 import json
 import socket
 import threading
@@ -38,9 +38,9 @@ def retry_on_socket_error(retry_limit):
 					time.sleep(2 ** retry_count)
 					retry_count += 1
 			if retry_count == retry_limit:
-				print "Retry count limit reached, aborting.."
+				print "Retry count limit reached, aborting.. (%s)" % func.__name__
 				self.shutdown_ = True
-				os.exit(-1)
+				sys.exit(-1)
 		return inner
 	return decorator
 
@@ -59,34 +59,24 @@ class Local(object):
 	def __init__(self, local_address, remote_address = None):
 		self.address_ = local_address
 		print "self id = %s" % self.id()
-		# listen to incomming connections
-		self.socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-		self.socket_.bind((self.address_.ip, int(self.address_.port)))
-		self.socket_.listen(10)
 		self.shutdown_ = False
-
-		# set data to empty dictionary
-		self.data_ = {}
-
 		# list of successors
 		self.successors_ = []
-
 		# join the DHT
 		self.join(remote_address)
-
-		# start the daemons
+		# we don't have deamons yet, until we start
 		self.daemons_ = {}
+		# initially no commands
+		self.command_ = []
+
+	def start(self):
+		# start the daemons
 		self.daemons_['run'] = Daemon(self, 'run')
 		self.daemons_['fix_fingers'] = Daemon(self, 'fix_fingers')
 		self.daemons_['stabilize'] = Daemon(self, 'stabilize')
-		self.daemons_['distribute_data'] = Daemon(self, 'distribute_data')
 		self.daemons_['update_successors'] = Daemon(self, 'update_successors')
 		for key in self.daemons_:
 			self.daemons_[key].start()
-
-	def __del__(self):
-		if self.socket_:
-			self.socket_.close()
 
 	def ping(self):
 		return True
@@ -146,29 +136,6 @@ class Local(object):
 		# Keep calling us
 		return True
 
-	@repeat_and_sleep(DISTRIBUTE_DATA_INT)
-	def distribute_data(self):
-		# make sure that we own all the keys else
-		to_remove = []
-		# to prevent from RE in case data gets updated by other thread
-		keys = self.data_.keys()
-		for key in keys:
-			if self.predecessor() and \
-			   not inrange(hash(key), self.predecessor().id(1), self.id(1)):
-				try:
-					node = self.find_successor(hash(key))
-					node.set(key, self.data_[key])
-					# print "moved %s into %s" % (key, node.id())
-					to_remove.append(key)
-				except socket.error:
-					# we'll migrate it next time
-					pass
-		# remove all we don't own or failed to move
-		for key in to_remove:
-			del self.data_[key]
-		# Keep calling us
-		return True
-
 	@repeat_and_sleep(UPDATE_SUCCESSORS_INT)
 	@retry_on_socket_error(UPDATE_SUCCESSORS_RET)
 	def update_successors(self):
@@ -198,12 +165,12 @@ class Local(object):
 				return remote
 		print "No successor available, aborting"
 		self.shutdown_ = True
-		os.exit(-1)
+		sys.exit(-1)
 
 	def predecessor(self):
 		return self.predecessor_
 
-	@retry_on_socket_error(FIND_SUCCESSOR_RET)
+	#@retry_on_socket_error(FIND_SUCCESSOR_RET)
 	def find_successor(self, id):
 		# The successor of a key can be us iff
 		# - we have a pred(n)
@@ -214,7 +181,7 @@ class Local(object):
 		node = self.find_predecessor(id)
 		return node.successor()
 
-	@retry_on_socket_error(FIND_PREDECESSOR_RET)
+	#@retry_on_socket_error(FIND_PREDECESSOR_RET)
 	def find_predecessor(self, id):
 		node = self
 		# If we are alone in the ring, we are the pred(id)
@@ -233,20 +200,12 @@ class Local(object):
 				return remote
 		return self
 
-	def get(self, key):
-		try:
-			return self.data_[key]
-		except Exception:
-			# not in our range
-			if not inrange(hash(key) % SIZE, self.predecessor().id(1), self.id(1)):
-				return self.find_successor(hash(key)).get(key)
-			return ""
-
-	def set(self, key, value):
-		# print "key %s with value %s set here" % (key, value)
-		self.data_[key] = value
-
 	def run(self):
+		# listen to incomming connections
+		self.socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		self.socket_.bind((self.address_.ip, int(self.address_.port)))
+		self.socket_.listen(10)
+
 		while 1:
 			try:
 				conn, addr = self.socket_.accept()
@@ -257,46 +216,49 @@ class Local(object):
 			request = read_from_socket(conn)
 			command = request.split(' ')[0]
 
+			# we take the command out
+			request = request[len(command) + 1:]
+
+			# "" = not respond anything
+			result = json.dumps("")
 			if command == 'get_successor':
-				conn.sendall(json.dumps({'ip': self.successor().address_.ip,
-										 'port': self.successor().address_.port}) +
-							 "\r\n")
+				successor = self.successor()
+				result = json.dumps((successor.address_.ip, successor.address_.port))
 			if command == 'get_predecessor':
+				# we can only reply if we have a predecessor
 				if self.predecessor_ != None:
-					conn.sendall(json.dumps({'ip': self.predecessor_.address_.ip,
-											 'port': self.predecessor_.address_.port})+
-							 "\r\n")
-				else:
-					conn.sendall(json.dumps("")+
-							 "\r\n")
+					predecessor = self.predecessor_
+					result = json.dumps((predecessor.address_.ip, predecessor.address_.port))
 			if command == 'find_successor':
-				successor = self.find_successor(int(request[1]))
-				conn.sendall(json.dumps({'ip': successor.address_.ip,
-										 'port': successor.address_.port})+
-							 "\r\n")
+				successor = self.find_successor(int(request))
+				result = json.dumps((successor.address_.ip, successor.address_.port))
 			if command == 'closest_preceding_finger':
-				closest = self.closest_preceding_finger(int(request[1]))
-				conn.sendall(json.dumps({'ip': closest.address_.ip,
-										 'port': closest.address_.port})+
-							 "\r\n")
+				closest = self.closest_preceding_finger(int(request))
+				result = json.dumps((closest.address_.ip, closest.address_.port))
 			if command == 'notify':
-				self.notify(Remote(Address(request[1], int(request[2]))))
+				npredecessor = Address(request.split(' ')[0], int(request.split(' ')[1]))
+				self.notify(Remote(npredecessor))
 			if command == 'get_successors':
-				conn.sendall(json.dumps(self.get_successors())+
-							 "\r\n")
+				result = json.dumps(self.get_successors())
 
-			if command == 'get':
-				conn.sendall(self.get(request[1])+
-							 "\r\n")
-			if command == 'set':
-				self.set(request[1], " ".join(request[2:]))
+			# or it could be a user specified operation
+			for t in self.command_:
+				if command == t[0]:
+					result = t[1](request)
 
+			send_to_socket(conn, result)
 			conn.close()
 
-			if request[0] == 'shutdown':
+			if command == 'shutdown':
 				self.socket_.close()
 				self.shutdown_ = True
 				break
+
+	def register_command(self, cmd, callback):
+		self.command_.append((cmd, callback))
+
+	def unregister_command(self, cmd):
+		self.command_ = filter(lambda t: True if t[0] != cmd else False, self.command_)
 
 if __name__ == "__main__":
 	import sys

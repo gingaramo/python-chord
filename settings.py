@@ -17,9 +17,6 @@ STABILIZE_RET = 4
 # Fix Fingers
 FIX_FINGERS_INT = 4
 
-# Distribute Data
-DISTRIBUTE_DATA_INT = 1
-
 # Update Successors
 UPDATE_SUCCESSORS_INT = 1
 UPDATE_SUCCESSORS_RET = 6

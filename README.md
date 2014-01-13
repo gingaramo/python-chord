@@ -1,27 +1,37 @@
 python-chord
 ============
 
-Python **Chord** implementation, [paper available here](http://pdos.csail.mit.edu/papers/chord:sigcomm01/chord_sigcomm.pdf).
+Python implementation of [this paper](http://pdos.csail.mit.edu/papers/chord:sigcomm01/chord_sigcomm.pdf).
 
-Its base class is Local, located in chord.py, that provides the overlay network and
+Its base class is `Local`, located in chord.py. It provides the overlay network and
 a lookup operation. Other commands such as 'get' or 'put' are provided by the top
-layers using Chord by registering those commands. This provides enough flexibility
-to add replication, re-distribution of keys/load, custom protocols, etc. in a simple
-and easy way by means of 'agents' (will be implemented soon).
+layers using Chord by registering those commands (take a look at dht.py). This provides
+enough flexibility to add replication, re-distribution of keys/load, custom protocols, 
+etc. in a simple and easy way by means of 'agents' (will be implemented soon).
 
 Currently supports concurrent addition of peers into the network and can handle node
-failures / leave. Key lookup consistency test implemented in test.py, currently nodes 
-distribute keys accordingly to node joins.
+failures / leave. Key lookup consistency test implemented in test.py.
 
-The behaviour can be greatly modified by setting the appropriate values on settings.py.
+The behaviour of the network can be greatly modified by setting the appropriate values 
+on `settings.py`.
 
 ### How to test?
 - `$>python test.py` to check consistency. Tests can fail due to the fact that the network is not stable yet (on consistency check), or that the new value was overriden by old value (on fusser test).
 - `$>python create_chord.py $N_CHORD_NODES` to run a DHT that lets you ask questions to random members.
 
-## Distributed File System
+## Distributed Hash Table
+A distributed hash table implementation on top of Chord is available in `dht.py`. It 
+uses the overlay network provided by Chord's algorithms and adds two more commands to
+the network, the commands `set` and `get`.
 
-A distributed file sistem implemented on top of python-chord can be found in dfs.py.
+After registering those commands with the appropriate callbacks we have a fairly 
+simple DHT implementation that also balances loads according to node joins.
+
+### To be implemented:
+- Replication to handle node failures/departures without losing information.
+
+## Distributed File System
+For this case we implemented a file system ... (to be continued)
 
 ### How to test?
 - `$>python create_chord.py $N_CHORD_NODES`, followed by `$>python dfs.py 

@@ -26,4 +26,4 @@ class Address(object):
 		return other.__hash__() == self.__hash__()
 
 	def __str__(self):
-		return "<%s>:%s" % (self.ip, self.port)
+		return "[\"%s\", %s]" % (self.ip, self.port)
