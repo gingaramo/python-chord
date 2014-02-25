@@ -16,7 +16,7 @@ The behaviour of the network can be greatly modified by setting the appropriate 
 on `settings.py`.
 
 ### How to test?
-- `$>python test.py` to check consistency. Tests can fail due to the fact that the network is not stable yet (on consistency check), or that the new value was overriden by old value (on fusser test).
+- `$>python test.py` to check consistency. Tests can fail due to the fact that the network is not stable yet, should work by increasing the rate of updates.
 - `$>python create_chord.py $N_CHORD_NODES` to run a DHT that lets you ask questions to random members.
 
 ## Distributed Hash Table

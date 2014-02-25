@@ -44,6 +44,7 @@ def retry_on_socket_error(retry_limit):
 		return inner
 	return decorator
 
+
 # deamon to run Local's run method
 class Daemon(threading.Thread):
 	def __init__(self, obj, method):
@@ -64,10 +65,22 @@ class Local(object):
 		self.successors_ = []
 		# join the DHT
 		self.join(remote_address)
-		# we don't have deamons yet, until we start
+		# we don't have deamons until we start
 		self.daemons_ = {}
 		# initially no commands
 		self.command_ = []
+
+	def shutdown(self):
+		self.shutdown_ = True
+		self.socket_.shutdown(socket.SHUT_RDWR)
+		self.socket_.close()
+
+	# logging function
+	def log(self, info):
+	    #f = open("/tmp/chord.log", "a+")
+	    #f.write(str(self.id()) + " : " +  info + "\n")
+	    #f.close()
+	    print str(self.id()) + " : " +  info
 
 	def start(self):
 		# start the daemons
@@ -77,6 +90,8 @@ class Local(object):
 		self.daemons_['update_successors'] = Daemon(self, 'update_successors')
 		for key in self.daemons_:
 			self.daemons_[key].start()
+
+		self.log("started")
 
 	def ping(self):
 		return True
@@ -93,9 +108,12 @@ class Local(object):
 		else:
 			self.finger_[0] = self
 
+		self.log("joined")
+
 	@repeat_and_sleep(STABILIZE_INT)
 	@retry_on_socket_error(STABILIZE_RET)
 	def stabilize(self):
+		self.log("stabilize")
 		suc = self.successor()
 		# We may have found that x is our new successor iff
 		# - x = pred(suc(n))
@@ -123,6 +141,7 @@ class Local(object):
 		# - the new node r is in the range (pred(n), n)
 		# OR
 		# - our previous predecessor is dead
+		self.log("notify")
 		if self.predecessor() == None or \
 		   inrange(remote.id(), self.predecessor().id(1), self.id()) or \
 		   not self.predecessor().ping():
@@ -131,6 +150,7 @@ class Local(object):
 	@repeat_and_sleep(FIX_FINGERS_INT)
 	def fix_fingers(self):
 		# Randomly select an entry in finger_ table and update its value
+		self.log("fix_fingers")
 		i = random.randrange(LOGSIZE - 1) + 1
 		self.finger_[i] = self.find_successor(self.id(1<<i))
 		# Keep calling us
@@ -139,6 +159,7 @@ class Local(object):
 	@repeat_and_sleep(UPDATE_SUCCESSORS_INT)
 	@retry_on_socket_error(UPDATE_SUCCESSORS_RET)
 	def update_successors(self):
+		self.log("update successor")
 		suc = self.successor()
 		# if we are not alone in the ring, calculate
 		if suc.id() != self.id():
@@ -151,6 +172,7 @@ class Local(object):
 		return True
 
 	def get_successors(self):
+		self.log("get_successors")
 		return map(lambda node: (node.address_.ip, node.address_.port), self.successors_[:N_SUCCESSORS-1])
 
 	def id(self, offset = 0):
@@ -162,6 +184,7 @@ class Local(object):
 		# it doesn't harm
 		for remote in [self.finger_[0]] + self.successors_:
 			if remote.ping():
+				self.finger_[0] = remote
 				return remote
 		print "No successor available, aborting"
 		self.shutdown_ = True
@@ -175,6 +198,7 @@ class Local(object):
 		# The successor of a key can be us iff
 		# - we have a pred(n)
 		# - id is in (pred(n), n]
+		self.log("find_successor")
 		if self.predecessor() and \
 		   inrange(id, self.predecessor().id(1), self.id(1)):
 			return self
@@ -183,11 +207,11 @@ class Local(object):
 
 	#@retry_on_socket_error(FIND_PREDECESSOR_RET)
 	def find_predecessor(self, id):
+		self.log("find_predecessor")
 		node = self
 		# If we are alone in the ring, we are the pred(id)
 		if node.successor().id() == node.id():
 			return node
-		# While id is not in (n, suc(n)] we are not alone in the ring
 		while not inrange(id, node.id(1), node.successor().id(1)):
 			node = node.closest_preceding_finger(id)
 		return node
@@ -195,18 +219,21 @@ class Local(object):
 	def closest_preceding_finger(self, id):
 		# first fingers in decreasing distance, then successors in
 		# increasing distance.
+		self.log("closest_preceding_finger")
 		for remote in reversed(self.successors_ + self.finger_):
 			if remote != None and inrange(remote.id(), self.id(1), id) and remote.ping():
 				return remote
 		return self
 
 	def run(self):
+		# should have a threadpool here :/
 		# listen to incomming connections
 		self.socket_ = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 		self.socket_.bind((self.address_.ip, int(self.address_.port)))
 		self.socket_.listen(10)
 
 		while 1:
+			self.log("run loop")
 			try:
 				conn, addr = self.socket_.accept()
 			except socket.error:
@@ -219,7 +246,7 @@ class Local(object):
 			# we take the command out
 			request = request[len(command) + 1:]
 
-			# "" = not respond anything
+			# defaul : "" = not respond anything
 			result = json.dumps("")
 			if command == 'get_successor':
 				successor = self.successor()
@@ -252,7 +279,9 @@ class Local(object):
 			if command == 'shutdown':
 				self.socket_.close()
 				self.shutdown_ = True
+				self.log("shutdown started")
 				break
+		self.log("execution terminated")
 
 	def register_command(self, cmd, callback):
 		self.command_.append((cmd, callback))
@@ -266,4 +295,4 @@ if __name__ == "__main__":
 		local = Local(Address("127.0.0.1", sys.argv[1]))
 	else:
 		local = Local(Address("127.0.0.1", sys.argv[1]), Address("127.0.0.1", sys.argv[2]))
-	local.run()
+	local.start()

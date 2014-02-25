@@ -16,7 +16,7 @@
 # first commit of it so things are a bit raw.
 #
 # I have not ran the POSIX test yet, but I did verify that the MD5 sum of the copy
-# of a 30 MB file is the same.
+# of a 30 MB file was the same.
 #
 # The structure is pretty simple, every item stored has the following fields:
 # {'type':('directory', 'file'),
@@ -34,6 +34,7 @@ import stat
 import errno
 import fuse
 import socket
+import dfs
 from time import time
 from subprocess import *
 
@@ -41,10 +42,7 @@ import chord
 import json 
 import base64
 
-
 fuse.fuse_python_api = (0, 2)
-
-
 
 # port from an chord node listening on <127.0.0.1:PORT>
 PORT = 19308
@@ -84,9 +82,9 @@ def logtofile(func):
 
 
 class FUSEDFS(fuse.Fuse):
-    def __init__(self, dht, *args, **kw):
+    def __init__(self, dfs, *args, **kw):
         fuse.Fuse.__init__(self, *args, **kw)
-        self.dht_ = dht
+        self.dfs_ = dfs
 
     # helper function to eliminate duplicated code
     def get_offsets(self, offset, size):
@@ -345,7 +343,12 @@ def main():
         FUSEDFS: A filesystem implemented on top of a DHT.
     """ + fuse.Fuse.fusage
 
-    server = FUSEDFS(version="%prog " + fuse.__version__,
+    if len(sys.argv) == 2:
+        dfs = Local(Address("127.0.0.1", sys.argv[1]))
+    else:
+        dfs = Local(Address("127.0.0.1", sys.argv[1]), Address("127.0.0.1", sys.argv[2]))
+
+    server = FUSEDFS(dfs, version="%prog " + fuse.__version__,
                      usage=usage, dash_s_do='setsingle')
     server.parse(errex=1)
     server.main()
