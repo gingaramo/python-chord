@@ -70,17 +70,23 @@ class Local(object):
 		# initially no commands
 		self.command_ = []
 
+	
+	# is this id within our range?
+	def is_ours(self, id):
+		assert id >= 0 and id < SIZE
+		return inrange(id, self.predecessor_.id(1), self.id(1))
+
 	def shutdown(self):
-		self.shutdown_ = True
+		self.shutdown_ = Trues
 		self.socket_.shutdown(socket.SHUT_RDWR)
 		self.socket_.close()
 
 	# logging function
 	def log(self, info):
-	    #f = open("/tmp/chord.log", "a+")
-	    #f.write(str(self.id()) + " : " +  info + "\n")
-	    #f.close()
-	    print str(self.id()) + " : " +  info
+	    f = open("/tmp/chord.log", "a+")
+	    f.write(str(self.id()) + " : " +  info + "\n")
+	    f.close()
+	    #print str(self.id()) + " : " +  info
 
 	def start(self):
 		# start the daemons

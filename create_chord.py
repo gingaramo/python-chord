@@ -23,9 +23,11 @@ for i in range(0, len(address_list)):
 	if len(locals_list) == 0:
 		local = Local(address_list[i])
 	else:
-		# use a random already created peer's address
-		# as a remote
-		local = Local(address_list[i], locals_list[random.randrange(len(locals_list))].address_)
+		# use a random already created peer's address as a remote
+		remote = locals_list[random.randrange(len(locals_list))].address_
+		local = Local(address_list[i], remote)
+	local.start()
+	print "Created at %s"  % address_list[i]
 	locals_list.append(local)
 	time.sleep(0.5)
 

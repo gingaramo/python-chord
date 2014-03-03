@@ -12,8 +12,7 @@
 # Brief Summary
 # =============
 # This is a FS implemented on top of python-chord library. There are many things
-# to experiment with (caching, adaptative load balancing, etc), and this is the 
-# first commit of it so things are a bit raw.
+# to experiment with (caching, adaptative load balancing, etc).
 #
 # I have not ran the POSIX test yet, but I did verify that the MD5 sum of the copy
 # of a 30 MB file was the same.
@@ -82,9 +81,9 @@ def logtofile(func):
 
 
 class FUSEDFS(fuse.Fuse):
-    def __init__(self, dfs, *args, **kw):
+    def __init__(self, local, *args, **kw):
         fuse.Fuse.__init__(self, *args, **kw)
-        self.dfs_ = dfs
+        self.local_ = local
 
     # helper function to eliminate duplicated code
     def get_offsets(self, offset, size):
@@ -92,32 +91,6 @@ class FUSEDFS(fuse.Fuse):
         start = offset % BLOCK_SIZE
         end = min(start + size, BLOCK_SIZE)
         return (block_offset, start, end)
-
-    # returns object representing a file/folder or None if it doesn't exist
-    def get(path):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(('127.0.0.1', PORT))
-        s.sendall("get %s\r\n" % path)
-        result = ""
-        while 1:
-            data = s.recv(256)
-            if data[-2:] == "\r\n":
-                result += data[:-2]
-                break
-            result += data
-
-        s.close()
-        if result == "":
-            return None
-        else:
-            return json.loads(result)
-
-    # saves the given object serialized on the DHT
-    def put(path, obj):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(('127.0.0.1', PORT))
-        s.sendall("set %s %s\r\n" % (path, json.dumps(obj)))
-        s.close()
 
     # This is the guy responsible of making our FS visible to linux
     @logtofile
@@ -344,11 +317,12 @@ def main():
     """ + fuse.Fuse.fusage
 
     if len(sys.argv) == 2:
-        dfs = Local(Address("127.0.0.1", sys.argv[1]))
+        local = Local(Address("127.0.0.1", sys.argv[1]))
     else:
-        dfs = Local(Address("127.0.0.1", sys.argv[1]), Address("127.0.0.1", sys.argv[2]))
+        local = Local(Address("127.0.0.1", sys.argv[1]), Address("127.0.0.1", sys.argv[2]))
 
-    server = FUSEDFS(dfs, version="%prog " + fuse.__version__,
+    local.start()
+    server = FUSEDFS(local, version="%prog " + fuse.__version__,
                      usage=usage, dash_s_do='setsingle')
     server.parse(errex=1)
     server.main()

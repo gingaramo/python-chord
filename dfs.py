@@ -2,6 +2,7 @@
 # write : file, offset, size, buf
 # truncate_size : file new_size
 # attr : file -> dict
+import settings
 
 BLOCK_SIZE = 4096
 
@@ -23,7 +24,7 @@ class DFS(object):
 
 		self.local_.register_command("read", read_wrap)
 		self.local_.register_command("write", write_wrap)
-		self.local_.register_command("attr", write_wrap)
+		self.local_.register_command("attr", attr_wrap)
 
 		self.local_.start()
 
@@ -34,34 +35,87 @@ class DFS(object):
         end = min(start + size, BLOCK_SIZE)
         return (block_offset, start, end)
 
-	def we_serve(self, file_name):
-		pass
-	def locate_remote(self, file_name):
-		pass
+    def get_id(self, file_name, offset):
+		block_offset, start, end = self.get_offsets(offset, 0)
+    	return "%s:%s" % (file_name, block_offset)
 
-	def _read(self, msg):
+	def get_hash(self, file_name, offset):
+		return hash(self.get_id(file_name, offset)) % settings.SIZE
 
-	def _write(self, msg):
+	def get_remote(self, file_name, offset):
+		hs = self.get_hash(file_name, offset)
+		suc = self.local_.find_successor(hs)
+		return suc
 
-	def _attr(self, msg):
+	def _read(self, request):
+		# request  = {'file_name':'my_file.txt', 'offset':<#NUMBER#>, 'size': <#NUMBER#>}
+		# response = {'status':'failed'} |
+		#			 {'status':'failed','code':<#CODE ERROR#>} |
+		#			 {'status':'redirect'}
+		# 			 {'status':'ok','data':<#DATA READ AS B64#>}
+		try:
+			data = json.loads(request)
+			if not self.local_.is_ours(self.get_hash(data['file_name'], data['offset'])):
+				return json.dumps({'status':'redirect'})
+			# otherwise continue
+			result = self.read(data['file_name'], data['offset'], data['size'])
+			if type result == type -1:
+				return json.dumps({'status':'failed', 'code': result})
+			result = base64.b64encode(result)
+			return json.dumpds({'status':'ok','data':total_read})
 
-	def read(self, file_name, offset, size):
+		except Exception:
+			return json.dumps({'status':'failed'})
+
+	def _write(self, request):
+		# request  = {'file_name':'my_file.txt', 'offset':<#NUMBER#>, 'data':<#B64 ENCODED DATA#>}
+		# response = {'status':'failed'} |
+		#			 {'status':'failed','code':<#CODE ERROR#>} |
+		#			 {'status':'redirect'}
+		# 			 {'status':'ok','bytes':<#BYTES WROTE#>}
+		try:
+			data = json.loads(request)
+			if not self.local_.is_ours(self.get_hash(data['file_name'], data['offset'])):
+				return json.dumps({'status':'redirect'})
+			result = self.write(data['file_name'], base64.b64decode(data['data']), offset)
+			if result < 0:
+				return json.dumps({'status':'failed','code':result})
+			else:
+				return json.dumps({'status':'ok','bytes':result})
+		except Exception:
+			return json.dumps({'status':'failed'})
+
+	def _attr(self, request):
+		# request  = {'file_name':'my_file.txt'[,'size':<#NEW VALUE#>|,'mode':<#NEW MODE#>]}
+		# response = {'status':'failed'} |
+		#			 {'status':'failed','code':<#CODE ERROR#>} |
+		#			 {'status':'redirect'}
+		try:
+			data = json.loads(request)
+			if not self.local_.is_ours(self.get_hash(data['file_name'], 0)):
+				return json.dumps({'status':'redirect'})
+
+		except Exception:
+			return json.dumps({'status':'failed'})
+
+	def trunc_(self, request):
+
+	def read(self, path, size, offset):
 		attr = self.attr(file_name)
 
 		if offset > attr.size:
 			return ""
 
 		block_offset, start, end = self.get_offsets(offset, size)
-		block_id = "%s:%s" % (file_name, block_offset)
+		block_id = self.get_id(file_name, offset)
 
-		if not we_serve(block_id):
-			return "-1"
 
 		result = self.data_[block_id][start:end]
-	def write(self, file, offset, size, buf):
+
+	def write(self, path, buf, offset):
 		pass
 
-	def attr(self, file):
+	def attr(self, path):
 		pass
 
 if __name__ == "__main__":
